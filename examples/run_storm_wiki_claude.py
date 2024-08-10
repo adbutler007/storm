@@ -22,7 +22,7 @@ from argparse import ArgumentParser
 
 sys.path.append('./src')
 from lm import ClaudeModel
-from rm import YouRM, BingSearch
+from rm import YouRM, BingSearch, TavilyRM
 from storm_wiki.engine import STORMWikiRunnerArguments, STORMWikiRunner, STORMWikiLMConfigs
 from utils import load_api_key
 
@@ -42,10 +42,10 @@ def main(args):
     # for outline_gen_lm which is responsible for organizing the collected information, and article_gen_lm
     # which is responsible for generating sections with citations.
     conv_simulator_lm = ClaudeModel(model='claude-3-haiku-20240307', max_tokens=500, **claude_kwargs)
-    question_asker_lm = ClaudeModel(model='claude-3-sonnet-20240229', max_tokens=500, **claude_kwargs)
+    question_asker_lm = ClaudeModel(model='claude-3-5-sonnet-20240620', max_tokens=500, **claude_kwargs)
     outline_gen_lm = ClaudeModel(model='claude-3-opus-20240229', max_tokens=400, **claude_kwargs)
-    article_gen_lm = ClaudeModel(model='claude-3-opus-20240229', max_tokens=700, **claude_kwargs)
-    article_polish_lm = ClaudeModel(model='claude-3-opus-20240229', max_tokens=4000, **claude_kwargs)
+    article_gen_lm = ClaudeModel(model='claude-3-5-sonnet-20240620', max_tokens=700, **claude_kwargs)
+    article_polish_lm = ClaudeModel(model='claude-3-5-sonnet-20240620', max_tokens=4000, **claude_kwargs)
 
     lm_configs.set_conv_simulator_lm(conv_simulator_lm)
     lm_configs.set_question_asker_lm(question_asker_lm)
@@ -64,9 +64,13 @@ def main(args):
     # STORM is a knowledge curation system which consumes information from the retrieval module.
     # Currently, the information source is the Internet and we use search engine API as the retrieval module.
     if args.retriever == 'bing':
-        rm = BingSearch(bing_search_api=os.getenv('BING_SEARCH_API_KEY'), k=engine_args.search_top_k)
+        rm = BingSearch(bing_search_api_key=os.getenv('BING_SEARCH_API_KEY'), k=engine_args.search_top_k)
     elif args.retriever == 'you':
         rm = YouRM(ydc_api_key=os.getenv('YDC_API_KEY'), k=engine_args.search_top_k)
+    elif args.retriever == 'tavily':
+        rm = TavilyRM(tavily_api_key=os.getenv('TAVILY_API_KEY'), k=engine_args.search_top_k)
+    else:
+        raise ValueError(f"Unsupported retriever: {args.retriever}")
 
     runner = STORMWikiRunner(engine_args, lm_configs, rm)
 
@@ -91,7 +95,7 @@ if __name__ == '__main__':
                         help='Maximum number of threads to use. The information seeking part and the article generation'
                              'part can speed up by using multiple threads. Consider reducing it if keep getting '
                              '"Exceed rate limit" error when calling LM API.')
-    parser.add_argument('--retriever', type=str, choices=['bing', 'you'],
+    parser.add_argument('--retriever', type=str, choices=['bing', 'you', 'tavily'],
                         help='The search engine API to use for retrieving information.')
     # stage of the pipeline
     parser.add_argument('--do-research', action='store_true',

@@ -9,7 +9,38 @@ from interface import ArticleGenerationModule
 from storm_wiki.modules.callback import BaseCallbackHandler
 from storm_wiki.modules.storm_dataclass import StormInformationTable, StormArticle, StormInformation
 from utils import ArticleTextProcessing
+import re
+import requests
+from urllib.parse import urlparse, urlunparse
 
+def fix_truncated_image_urls(article_content):
+    def verify_image_url(url, extensions=['.png', '.jpg']):
+        parsed_url = urlparse(url)
+        for ext in extensions:
+            test_url = urlunparse(parsed_url._replace(path=parsed_url.path + ext))
+            try:
+                response = requests.head(test_url, timeout=5)
+                if response.status_code == 200:
+                    return test_url
+            except requests.RequestException:
+                logging.warning(f"Error verifying URL {test_url}: {str(e)}")
+                return None
+
+    def replace_truncated_url(match):
+        url = match.group(1)
+        if url.endswith('.'):  # This checks for the incomplete file stub ending with a dot
+            verified_url = verify_image_url(url[:-1])  # Remove the trailing dot before verification
+            if verified_url:
+                return f"![]({verified_url})"
+            else:
+                # If verification fails, append .jpg as a fallback
+                return f"![]({url}jpg)"
+        return match.group(0)
+
+    # Updated pattern to match incomplete image embeds
+    pattern = r'!\[\]\((https?://[^\s)]+)\.'
+    fixed_content = re.sub(pattern, replace_truncated_url, article_content)
+    return fixed_content
 
 class StormArticleGenerationModule(ArticleGenerationModule):
     """
@@ -72,14 +103,13 @@ class StormArticleGenerationModule(ArticleGenerationModule):
             )
             section_output_dict_collection = [section_output_dict]
         else:
-
             with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_thread_num) as executor:
                 future_to_sec_title = {}
                 for section_title in sections_to_write:
                     # We don't want to write a separate introduction section.
                     if section_title.lower().strip() == 'introduction':
                         continue
-                        # We don't want to write a separate conclusion section.
+                    # We don't want to write a separate conclusion section.
                     if section_title.lower().strip().startswith(
                             'conclusion') or section_title.lower().strip().startswith('summary'):
                         continue
@@ -98,12 +128,12 @@ class StormArticleGenerationModule(ArticleGenerationModule):
 
         article = copy.deepcopy(article_with_outline)
         for section_output_dict in section_output_dict_collection:
+            fixed_section_content = fix_truncated_image_urls(section_output_dict["section_content"])
             article.update_section(parent_section_name=topic,
                                    current_section_content=section_output_dict["section_content"],
                                    current_section_info_list=section_output_dict["collected_info"])
         article.post_processing()
         return article
-
 
 class ConvToSection(dspy.Module):
     """Use the information collected from the information-seeking conversation to write a section."""
@@ -129,17 +159,62 @@ class ConvToSection(dspy.Module):
 
 
 class WriteSection(dspy.Signature):
-    """Write a Wikipedia section based on the collected information.
+    """You are tasked with writing a Wikipedia-style section based on collected information. Follow these instructions carefully to create an informative and well-structured section.
 
-        Here is the format of your writing:
-            1. Use "#" Title" to indicate section title, "##" Title" to indicate subsection title, "###" Title" to indicate subsubsection title, and so on.
-            2. Use [1], [2], ..., [n] in line (for example, "The capital of the United States is Washington, D.C.[1][3]."). You DO NOT need to include a References or Sources section to list the sources at the end.
+    First, review the collected information provided:
+
+    Now, follow these steps to write the Wikipedia section:
+
+    1. Begin with the main section title using a single "#" followed by the section title.
+
+    2. Organize the information into logical subsections. Use "##" for subsection titles. Avoid using more than two levels of headings (i.e., don't use ### or ####). Instead, incorporate lower-level topics into paragraphs under their respective subsections.
+
+    3. Write in a neutral, encyclopedic tone. Present facts and information objectively, avoiding personal opinions or biases.
+
+    4. Use [1], [2], ..., [n] inline to indicate references. For example: "The capital of the United States is Washington, D.C.[1][3]." Do not include a separate References or Sources section at the end.
+
+    5. If there are relevant figures in the collected information, include them using this format. Note this is just an example and you should use the actual figure caption, and full url with file name and extension, sources and disclaimers, and [n] reference id from the collected information.
+
+    Example:
+
+    Figure caption sourced verbatim from the collected information.
+
+    ![](full image url verbatim from the collected information including full image file name and extension)
+
+    Associated sources and disclaimers verbatim from the collected information, if any. Add [n] inline where n is the article source of the figure to reference the figure.
+
+    Important: Always include the entire path to the image url and close all brackets so the image embed will render properly when parsed from markdown.
+
+    6. If there are relevant tables in the collected information, include them using the provided markdown grid format. Note this is just an example and you should use the actual table caption, table content, sources and disclaimers, and [n] reference id from the collected information.
+
+    Example:
+    Table caption sourced verbatim from the collected information...
+
+    +------------+--------+---------------------+
+    | Header 1   | Header | Header 3            |
+    +============+========+=====================+
+    | Row 1, Col | Row 1, | Row 1, Col 3        |
+    +------------+--------+---------------------+
+    | Row 2, Col | Row 2, | Row 2, Col 3        |
+    +------------+--------+---------------------+
+
+    Associated sources and disclaimers verbatim from the collected information, if any... Add [n] inline where n is the article source of the table to reference the table.
+
+    7. Ensure that the content flows logically from one subsection to another, maintaining coherence throughout the entire section.
+
+    8. Aim for a comprehensive yet concise presentation of the information. Prioritize the most important and relevant facts related to the section title.
+
+    9. If there are any contradictions or uncertainties in the collected information, present multiple viewpoints or indicate that the information is disputed, using appropriate references.
+
+    10. Proofread your writing for clarity, grammar, and adherence to Wikipedia-style formatting.
+
+    Please provide your completed Wikipedia section based on these instructions, using the collected information and adhering to the specified format. Begin your response with the main section title and continue with the content, including any relevant subsections, figures, and tables as needed. Do not include a separate reference section.
     """
 
     info = dspy.InputField(prefix="The collected information:\n", format=str)
     topic = dspy.InputField(prefix="The topic of the page: ", format=str)
     section = dspy.InputField(prefix="The section you need to write: ", format=str)
     output = dspy.OutputField(
-        prefix="Write the section with proper inline citations (Start your writing with # section title. Don't include the page title or try to write other sections):\n",
+        prefix="Write the section precisely adhering to the instructions with proper inline citations (Start your writing with # section title. Don't include the page title or try to write other sections):\n",
         format=str
     )

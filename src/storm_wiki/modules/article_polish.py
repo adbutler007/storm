@@ -27,7 +27,7 @@ class StormArticlePolishingModule(ArticlePolishingModule):
     def polish_article(self,
                        topic: str,
                        draft_article: StormArticle,
-                       remove_duplicate: bool = False) -> StormArticle:
+                       remove_duplicate: bool = True) -> StormArticle:
         """
         Polish article.
 

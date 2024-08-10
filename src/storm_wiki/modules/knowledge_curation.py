@@ -97,7 +97,7 @@ class WikiWriter(dspy.Module):
 class AskQuestion(dspy.Signature):
     """You are an experienced Wikipedia writer. You are chatting with an expert to get information for the topic you want to contribute. Ask good questions to get more useful information relevant to the topic.
     When you have no more question to ask, say "Thank you so much for your help!" to end the conversation.
-    Please only ask a question at a time and don't ask what you have asked before. Your questions should be related to the topic you want to write."""
+    Please only ask a question at a time and don't ask what you have asked before. Never ask multi-subject questions. Each question should target exactly one subject. Your questions should be related to the topic you want to write."""
 
     topic = dspy.InputField(prefix='Topic you want to write: ', format=str)
     conv = dspy.InputField(prefix='Conversation history:\n', format=str)
@@ -108,7 +108,7 @@ class AskQuestionWithPersona(dspy.Signature):
     """You are an experienced Wikipedia writer and want to edit a specific page. Besides your identity as a Wikipedia writer, you have specific focus when researching the topic.
     Now, you are chatting with an expert to get information. Ask good questions to get more useful information.
     When you have no more question to ask, say "Thank you so much for your help!" to end the conversation.
-    Please only ask a question at a time and don't ask what you have asked before. Your questions should be related to the topic you want to write."""
+    Please only ask a question at a time and don't ask what you have asked before. Never ask multi-subject questions. Each question should target exactly one subject. Your questions should be related to the topic you want to write."""
 
     topic = dspy.InputField(prefix='Topic you want to write: ', format=str)
     persona = dspy.InputField(prefix='Your persona besides being a Wikipedia writer: ', format=str)
@@ -117,8 +117,8 @@ class AskQuestionWithPersona(dspy.Signature):
 
 
 class QuestionToQuery(dspy.Signature):
-    """You want to answer the question using Google search. What do you type in the search box?
-        Write the queries you will use in the following format:
+    """You want to answer the question using a hybrid retriever (BM25, colBertv2, vectorindex with Cohere reranker). What do you type in the query box?
+        Write the queries you will use in the following format. Never ask multi-subject questions. Each question should target exactly one subject:
         - query 1
         - query 2
         ...
@@ -130,8 +130,39 @@ class QuestionToQuery(dspy.Signature):
 
 
 class AnswerQuestion(dspy.Signature):
-    """You are an expert who can use information effectively. You are chatting with a Wikipedia writer who wants to write a Wikipedia page on topic you know. You have gathered the related information and will now use the information to form a response.
-    Make your response as informative as possible and make sure every sentence is supported by the gathered information. If [Gathered information] is not related to he [Topic] and [Question], output "Sorry, I don't have enough information to answer the question."."""
+    """You are an expert tasked with providing information for a Wikipedia writer. Your goal is to use the gathered information effectively to answer a question about a specific topic. Follow these instructions carefully:
+
+    1. Carefully read and analyze the gathered information in relation to the topic and question.
+
+    2. Formulate a comprehensive response that addresses the question and provides valuable insights about the topic. Ensure that every sentence, figure, and table in your response is supported by the gathered information.
+
+    3. Structure your response in a clear and logical manner, suitable for a Wikipedia article. Use appropriate headings and subheadings if necessary.
+
+    4. Include relevant figures and simple tables from the gathered information to enhance understanding. Follow these guidelines:
+
+    For figures:
+    - Use the exact caption and other elements provided in the gathered information.
+    - Use the following format:
+        [Figure caption]
+        ![]([full image URL including full file name and file extension])
+        [Associated sources and disclaimers, if any]
+
+    For tables:
+    - Include only simple tables (5 or fewer columns, 8 or fewer rows, no nested tables or complex structures).
+    - Use the exact caption and other elements provided in the gathered information.
+    - Use the following markdown grid format:
+        [Table caption]
+        +------------+------------+------------+
+        | Header 1   | Header 2   | Header 3   |
+        +============+============+============+
+        | Row 1, Col | Row 1, Col | Row 1, Col |
+        +------------+------------+------------+
+        [Associated sources and disclaimers, if any]
+
+    6. If the gathered information is not related to the topic and question, respond with: "Sorry, I don't have enough information to answer the question."
+
+    Remember to maintain a neutral, encyclopedic tone throughout your response, suitable for a Wikipedia article.
+    """
 
     topic = dspy.InputField(prefix='Topic you are discussing about:', format=str)
     conv = dspy.InputField(prefix='Question:\n', format=str)

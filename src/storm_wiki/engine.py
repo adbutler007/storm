@@ -3,6 +3,9 @@ import logging
 import os
 from dataclasses import dataclass, field
 from typing import Union, Literal, Optional
+import re
+import requests
+from urllib.parse import urlparse, urlunparse
 
 import dspy
 from interface import Engine, LMConfigs
@@ -157,6 +160,34 @@ class STORMWikiRunner(Engine):
         self.lm_configs.init_check()
         self.apply_decorators()
 
+    def fix_truncated_image_urls(self, article_content):
+        def verify_image_url(url, extensions=['.png', '.jpg']):
+            parsed_url = urlparse(url)
+            for ext in extensions:
+                test_url = urlunparse(parsed_url._replace(path=parsed_url.path + ext))
+                try:
+                    response = requests.head(test_url, timeout=5)
+                    if response.status_code == 200:
+                        return test_url
+                except requests.RequestException as e:
+                    logging.warning(f"Error verifying URL {test_url}: {str(e)}")
+            return None
+
+        def replace_truncated_url(match):
+            url = match.group(1)
+            verified_url = verify_image_url(url)
+            if verified_url:
+                return f"![]({verified_url})"
+            else:
+                # If verification fails, append .jpg as a fallback
+                return f"![]({url}.jpg)"
+
+        # Pattern to match incomplete image embeds
+        pattern = r'!\[\]\((https?://[^\s)]+)\.'
+        fixed_content = re.sub(pattern, replace_truncated_url, article_content)
+        return fixed_content
+
+
     def run_knowledge_curation_module(self,
                                       ground_truth_url: str = "None",
                                       callback_handler: BaseCallbackHandler = None) -> StormInformationTable:
@@ -189,19 +220,22 @@ class STORMWikiRunner(Engine):
         return outline
 
     def run_article_generation_module(self,
-                                      outline: StormArticle,
-                                      information_table=StormInformationTable,
+                                      information_table: StormInformationTable,
+                                      article_with_outline: StormArticle,
                                       callback_handler: BaseCallbackHandler = None) -> StormArticle:
-
-        draft_article = self.storm_article_generation.generate_article(
+        article = self.storm_article_generation_module.generate_article(
             topic=self.topic,
             information_table=information_table,
-            article_with_outline=outline,
+            article_with_outline=article_with_outline,
             callback_handler=callback_handler
         )
-        draft_article.dump_article_as_plain_text(os.path.join(self.article_output_dir, 'storm_gen_article.txt'))
-        draft_article.dump_reference_to_file(os.path.join(self.article_output_dir, 'url_to_info.json'))
-        return draft_article
+        
+        # Fix truncated image URLs
+        fixed_content = self.fix_truncated_image_urls(article.get_article_as_str())
+        article.set_article_from_str(fixed_content)
+        
+        article.dump_article_to_file(os.path.join(self.article_output_dir, 'storm_gen_article.txt'))
+        return article
 
     def run_article_polishing_module(self,
                                      draft_article: StormArticle,
@@ -277,7 +311,9 @@ class STORMWikiRunner(Engine):
             makeStringRed("No action is specified. Please set at least one of --do-research, --do-generate-outline, --do-generate-article, --do-polish-article")
 
         self.topic = topic
-        self.article_dir_name = topic.replace(' ', '_').replace('/', '_')
+        truncated_topic = ' '.join(topic.split()[:5])  # Take first 5 words
+        safe_topic = ''.join(c if c.isalnum() else '_' for c in truncated_topic)
+        self.article_dir_name = safe_topic[:50]  # Limit to 50 characters
         self.article_output_dir = os.path.join(self.args.output_dir, self.article_dir_name)
         os.makedirs(self.article_output_dir, exist_ok=True)
 
