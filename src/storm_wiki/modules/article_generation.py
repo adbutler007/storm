@@ -22,7 +22,7 @@ def fix_truncated_image_urls(article_content):
                 response = requests.head(test_url, timeout=5)
                 if response.status_code == 200:
                     return test_url
-            except requests.RequestException:
+            except requests.RequestException as e:
                 logging.warning(f"Error verifying URL {test_url}: {str(e)}")
                 return None
 
